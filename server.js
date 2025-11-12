@@ -96,9 +96,30 @@ app.use('/api/compatibility', compatibilityRoutes);
 app.use('/api/random-quiz', randomQuizRoutes);
 app.use('/api/truth-or-dare', truthOrDareRoutes);
 
-// Health check
+// Root route - API info
+app.get('/', (req, res) => {
+  res.json({
+    message: 'US Chat App API',
+    version: '1.0.0',
+    status: 'running',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: '/health',
+      api: '/api',
+      docs: 'See README.md for API documentation'
+    }
+  });
+});
+
+// Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date() });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development',
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+  });
 });
 
 // Initialize socket.io
