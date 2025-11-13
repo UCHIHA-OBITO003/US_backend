@@ -1,7 +1,8 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
+import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
-import { hashPassword, comparePassword, generateToken, sanitizeInput } from '../utils/helpers.js';
+import { sanitizeInput, hashPassword, comparePassword } from '../utils/helpers.js';
 import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -10,7 +11,7 @@ const router = express.Router();
 router.post('/register',
   body('username').isLength({ min: 3, max: 30 }).trim(),
   body('password').isLength({ min: 6 }),
-  body('displayName').isLength({ min: 1, max: 50 }).trim(),
+  body('displayName').optional().isLength({ min: 1, max: 50 }).trim(),
   async (req, res) => {
     try {
       const errors = validationResult(req);
@@ -20,12 +21,8 @@ router.post('/register',
 
       const { username, password, displayName } = req.body;
 
-      // Sanitize inputs
-      const sanitizedUsername = sanitizeInput(username);
-      const sanitizedDisplayName = sanitizeInput(displayName);
-
       // Check if user exists
-      const existingUser = await User.findOne({ username: sanitizedUsername });
+      const existingUser = await User.findOne({ username: username.toLowerCase() });
       if (existingUser) {
         return res.status(400).json({ error: 'Username already taken' });
       }
@@ -35,33 +32,29 @@ router.post('/register',
 
       // Create user
       const user = new User({
-        username: sanitizedUsername,
-        passwordHash,
-        displayName: sanitizedDisplayName
+        username: sanitizeInput(username.toLowerCase()),
+        displayName: sanitizeInput(displayName || username),
+        passwordHash
       });
 
       await user.save();
 
       // Generate token
-      const token = generateToken(user._id);
-
-      res.cookie('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-      });
+      const token = jwt.sign(
+        { userId: user._id },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      );
 
       res.status(201).json({
-        message: 'User registered successfully',
+        message: 'User created successfully',
+        token,
         user: {
           id: user._id,
           username: user.username,
           displayName: user.displayName,
-          avatar: user.avatar,
-          theme: user.theme
-        },
-        token
+          avatar: user.avatar
+        }
       });
     } catch (error) {
       console.error('Register error:', error);
@@ -72,7 +65,7 @@ router.post('/register',
 
 // Login
 router.post('/login',
-  body('username').trim().notEmpty(),
+  body('username').notEmpty().trim(),
   body('password').notEmpty(),
   async (req, res) => {
     try {
@@ -84,7 +77,7 @@ router.post('/login',
       const { username, password } = req.body;
 
       // Find user
-      const user = await User.findOne({ username: sanitizeInput(username) });
+      const user = await User.findOne({ username: username.toLowerCase() });
       if (!user) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
@@ -95,23 +88,16 @@ router.post('/login',
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      // Update last seen
-      user.lastSeen = new Date();
-      user.isOnline = true;
-      await user.save();
-
       // Generate token
-      const token = generateToken(user._id);
-
-      res.cookie('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        maxAge: 7 * 24 * 60 * 60 * 1000
-      });
+      const token = jwt.sign(
+        { userId: user._id },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      );
 
       res.json({
         message: 'Login successful',
+        token,
         user: {
           id: user._id,
           username: user.username,
@@ -119,8 +105,7 @@ router.post('/login',
           avatar: user.avatar,
           theme: user.theme,
           currentMood: user.currentMood
-        },
-        token
+        }
       });
     } catch (error) {
       console.error('Login error:', error);
@@ -129,35 +114,44 @@ router.post('/login',
   }
 );
 
+// Verify token
+router.get('/verify', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .select('-passwordHash -passcode');
+
+    res.json({
+      user: {
+        id: user._id,
+        username: user.username,
+        displayName: user.displayName,
+        avatar: user.avatar,
+        theme: user.theme,
+        currentMood: user.currentMood,
+        biometricEnabled: user.biometricEnabled,
+        snapScore: user.snapScore
+      }
+    });
+  } catch (error) {
+    console.error('Verify token error:', error);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
 // Logout
 router.post('/logout', authenticateToken, async (req, res) => {
   try {
-    // Update user status
+    // Update user online status
     await User.findByIdAndUpdate(req.user._id, {
       isOnline: false,
       lastSeen: new Date()
     });
 
-    res.clearCookie('token');
-    res.json({ message: 'Logout successful' });
+    res.json({ message: 'Logged out successfully' });
   } catch (error) {
     console.error('Logout error:', error);
     res.status(500).json({ error: 'Server error' });
   }
-});
-
-// Verify token
-router.get('/verify', authenticateToken, (req, res) => {
-  res.json({
-    user: {
-      id: req.user._id,
-      username: req.user.username,
-      displayName: req.user.displayName,
-      avatar: req.user.avatar,
-      theme: req.user.theme,
-      currentMood: req.user.currentMood
-    }
-  });
 });
 
 export default router;

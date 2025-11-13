@@ -185,4 +185,3 @@ Recommended platforms:
 
 MIT
 
-# US_backend

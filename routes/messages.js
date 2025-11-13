@@ -61,15 +61,22 @@ router.get('/:userId', authenticateToken, async (req, res) => {
     }
 
     // Only return non-expired messages (snaps that haven't been viewed or deleted)
+    // CRITICAL FIX: Use $and to combine both conditions properly
     const messages = await Message.find({
-      $or: [
-        { from: currentUserId, to: userId },
-        { from: userId, to: currentUserId }
-      ],
-      $or: [
-        { isSnap: false }, // Regular messages
-        { isSnap: true, viewedAt: null }, // Unviewed snaps
-        { isSnap: true, expiresAt: { $gt: new Date() } } // Snaps not yet expired
+      $and: [
+        {
+          $or: [
+            { from: currentUserId, to: userId },
+            { from: userId, to: currentUserId }
+          ]
+        },
+        {
+          $or: [
+            { isSnap: false }, // Regular messages
+            { isSnap: true, viewedAt: null }, // Unviewed snaps
+            { isSnap: true, expiresAt: { $gt: new Date() } } // Snaps not yet expired
+          ]
+        }
       ]
     })
       .populate('from', 'displayName avatar')
